@@ -350,7 +350,6 @@ impl ChatWidget {
 
         self.add_to_history(history_cell::new_warning_event(message));
         self.request_redraw();
-        self.maybe_send_next_queued_input();
     }
 
     pub(super) fn on_error(&mut self, message: String) {
