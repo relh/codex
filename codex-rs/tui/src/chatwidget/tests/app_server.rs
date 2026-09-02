@@ -1124,8 +1124,9 @@ async fn live_app_server_stream_recovery_restores_previous_status_header() {
 }
 
 #[tokio::test]
-async fn live_app_server_server_overloaded_error_renders_warning() {
-    let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
+async fn live_app_server_server_overloaded_error_preserves_queued_follow_up() {
+    let (mut chat, mut rx, mut op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
+    chat.thread_id = Some(ThreadId::new());
 
     chat.handle_server_notification(
         ServerNotification::TurnStarted(TurnStartedNotification {
@@ -1144,6 +1145,9 @@ async fn live_app_server_server_overloaded_error_renders_warning() {
         /*replay_kind*/ None,
     );
     drain_insert_history(&mut rx);
+    chat.queue_user_message(UserMessage::from(
+        "Now that the prerequisite is finished, implement the dependent task.",
+    ));
 
     chat.handle_server_notification(
         ServerNotification::Error(ErrorNotification {
@@ -1163,6 +1167,34 @@ async fn live_app_server_server_overloaded_error_renders_warning() {
     assert_eq!(cells.len(), 1);
     assert_eq!(lines_to_single_string(&cells[0]), "⚠ server overloaded\n");
     assert!(!chat.bottom_pane.is_task_running());
+
+    chat.handle_server_notification(
+        ServerNotification::TurnCompleted(TurnCompletedNotification {
+            thread_id: "thread-1".to_string(),
+            turn: AppServerTurn {
+                id: "turn-1".to_string(),
+                items_view: codex_app_server_protocol::TurnItemsView::Full,
+                items: Vec::new(),
+                status: AppServerTurnStatus::Failed,
+                error: Some(AppServerTurnError {
+                    message: "server overloaded".to_string(),
+                    codex_error_info: Some(CodexErrorInfo::ServerOverloaded),
+                    additional_details: None,
+                }),
+                started_at: None,
+                completed_at: Some(0),
+                duration_ms: None,
+            },
+        }),
+        /*replay_kind*/ None,
+    );
+
+    assert!(drain_insert_history(&mut rx).is_empty());
+    assert_no_submit_op(&mut op_rx);
+    assert_eq!(
+        chat.queued_user_message_texts(),
+        vec!["Now that the prerequisite is finished, implement the dependent task."]
+    );
 }
 
 #[tokio::test]
